@@ -37,7 +37,7 @@ func watch(filePath string, m metaData) {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: %s pattern cmd [args...]\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage: %s pattern cmd [args...]\n", os.Args[0])
 	os.Exit(1)
 }
 
