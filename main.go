@@ -55,7 +55,8 @@ func main() {
 		os.Exit(1)
 	}
 	if len(matches) < 1 {
-		fmt.Fprintf(os.Stderr, "warning: could not match file pattern: %q\n", args[0])
+		fmt.Fprintf(os.Stderr, "error: could not match file pattern: %q\n", args[0])
+		os.Exit(1)
 	}
 	for _, file := range matches {
 		stat, err := os.Stat(file)
