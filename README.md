@@ -17,7 +17,7 @@ written so that it is as simple and cross-platform as possible.
 
 ## Usage
 
-    watch '*.go' go run \%
+    watch '*.go' go run %
 
 ## License
 
