@@ -2,126 +2,106 @@
 package main
 
 import (
-	"bufio"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
-type file struct {
-	Path string
-	Cmd  []string
-	Stat os.FileInfo
-}
-
 var (
-	dur     = flag.Int("d", 1, "delay (in seconds) between each poll")
-	verbose = flag.Bool("v", false, "verbose")
+	delay = flag.Int("d", 1, "delay (in seconds) between each poll")
+
+	workch chan string
+
+	mu    sync.Mutex
+	files map[string]os.FileInfo
 )
 
-func watch(f file, ch chan file) {
-	var dur = time.Second * time.Duration(*dur)
+func watch(path string) {
+	dur := time.Second * time.Duration(*delay)
 	for {
 		time.Sleep(dur)
-		s, err := os.Stat(f.Path)
+		fi, err := os.Stat(path)
 		if err != nil {
 			continue
 		}
-		if s.Size() != f.Stat.Size() || s.Mode() != f.Stat.Mode() || s.ModTime() != f.Stat.ModTime() {
-			f.Stat = s
-			if *verbose {
-				log.Printf("%s changed\n", f.Path)
+		mu.Lock()
+		stat, ok := files[path]
+		mu.Unlock()
+		if ok && stat != nil {
+			if fi.Size() == stat.Size() && fi.Mode() == stat.Mode() && fi.ModTime() == stat.ModTime() && fi.IsDir() == stat.IsDir() {
+				continue
 			}
-			ch <- f
 		}
+		workch <- path
+		mu.Lock()
+		files[path] = fi
+		mu.Unlock()
 	}
 }
 
-func usage() {
-	fmt.Fprintf(os.Stderr, "Usage: %s [-v] [-d delay] pattern cmd [args...]\n", os.Args[0])
-	os.Exit(1)
+func run(path string, args []string) {
+	var (
+		cmdlist = strings.Join(args, " ")
+		sb      strings.Builder
+	)
+	for i, r := range cmdlist {
+		if i > 0 {
+			if r == '%' && cmdlist[i-1] != '\\' {
+				sb.WriteString(path)
+			} else {
+				sb.WriteRune(r)
+			}
+			continue
+		}
+		sb.WriteRune(r)
+	}
+	cmdargs := strings.Fields(sb.String())
+	cmd := exec.Command(cmdargs[0], cmdargs[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Run()
 }
 
 func main() {
-	var workch = make(chan file)
-	flag.Usage = usage
+	workch = make(chan string)
+	files = make(map[string]os.FileInfo)
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [ -d delay ] 'pattern' cmd [ args... ]\n", os.Args[0])
+	}
 	flag.Parse()
-	var (
-		args    = flag.Args()
-		matches []string
-		err     error
-	)
-	if fi, _ := os.Stdin.Stat(); (fi.Mode() & os.ModeCharDevice) == 0 {
-		r := bufio.NewReader(os.Stdin)
-		for {
-			ln, err := r.ReadString('\n')
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-
-			matches = append(matches, strings.Trim(ln, "\n"))
-		}
-	} else {
-		if len(args) < 2 {
-			usage()
-		}
-		matches, err = filepath.Glob(args[0])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%q: %s\n", args[0], err)
-			os.Exit(1)
-		}
-		args = args[1:]
-	}
-	if *verbose {
-		log.Printf("watching: %+v\n", matches)
-	}
-	if len(matches) < 1 {
-		fmt.Fprintf(os.Stderr, "could not match file pattern: %q\n", args[0])
+	args := flag.Args()
+	if flag.NArg() < 1 {
+		flag.Usage()
 		os.Exit(1)
 	}
-	for _, f := range matches {
-		stat, err := os.Stat(f)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "stat %q: %s\n", f, err)
-			continue
-		}
-		var cmd []string
-		for _, arg := range args {
-			if arg == "%" {
-				arg = f
-			} else if strings.Contains(arg, "\\%") {
-				arg = strings.Replace(arg, "\\%", "%", -1)
-			}
-			cmd = append(cmd, arg)
-		}
-		go watch(file{
-			Path: f,
-			Cmd:  cmd,
-			Stat: stat,
-		}, workch)
+	pattern := args[0]
+	args = args[1:]
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		panic(err)
 	}
-
-	for file := range workch {
-		if *verbose {
-			log.Printf("running %q with args %+v\n", file.Cmd[0], file.Cmd[1:])
+	if len(args) < 1 {
+		flag.Usage()
+		os.Exit(1)
+	}
+	if len(matches) < 1 {
+		matches = append(matches, pattern)
+	}
+	for _, path := range matches {
+		fi, err := os.Stat(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
 		}
-		e := exec.Command(file.Cmd[0], file.Cmd[1:]...)
-		e.Stdout = os.Stdout
-		e.Stderr = os.Stderr
-		e.Stdin = os.Stdin
-		if err := e.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "run: %s\n", err)
-		}
+		mu.Lock()
+		files[path] = fi
+		mu.Unlock()
+		go watch(path)
+	}
+	for path := range workch {
+		run(path, args)
 	}
 }
