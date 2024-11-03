@@ -19,10 +19,6 @@ written so that it is as simple and cross-platform as possible.
 
     watch '*.go' go run %
 
-or
-
-	ls | watch cmd args
-
 ## License
 
 MIT
