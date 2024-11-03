@@ -1,4 +1,27 @@
-// Command watch runs a command each time a set of files changes.
+// Command watch runs a command when a set of files changes.
+//
+// Usage:
+//
+//	watch [ -d delay ] 'pattern' cmd [ args... ]
+//
+// Watch works by periodically checking the status of the specified
+// files using [os.Stat]. When a change is detected (e.g., modification
+// time or file size), the command specified by the user is executed.
+//
+// To save system resources, a delay is used (specified in seconds),
+// which allows watch to intermittenly check for file changes.  This
+// approach also prevents multiple rapid executions if several changes
+// are made rapidly.
+//
+// The pattern (e.g., '*.go', '*' or a file name) specifies which files to
+// watch. If the pattern is meant to be globbed it needs to be quoted to
+// prevent the shell from interpreting it.  Watch only takes one pattern as
+// an argument.
+//
+// The command to be executed needs to exist in `$PATH` or a full file
+// path is required. If one or more unescaped `%` exists in the arguments
+// list it will be replaced with the file path of the file that was
+// modified.
 package main
 
 import (
